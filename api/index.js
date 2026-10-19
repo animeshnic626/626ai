@@ -14,10 +14,9 @@ export default async function handler(req, res) {
       const text = message.text || message.caption || "";
 
       if (text) {
-        let answer = "";
+        let answer = "Извините, не удалось получить ответ.";
 
         try {
-          // Пробуем универсальный прямой запрос через fetch с самой проверенной моделью gemini-2.0-flash
           const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -28,16 +27,13 @@ export default async function handler(req, res) {
 
           const geminiData = await geminiRes.json();
 
-          // Если Google вернул ошибку, покажем её прямо в Telegram для теста
-          if (geminiData.error) {
-            answer = "Ошибка Google: " + geminiData.error.message;
-          } else if (geminiData.candidates && geminiData.candidates[0].content.parts[0].text) {
+          if (geminiData.candidates && geminiData.candidates[0].content.parts[0].text) {
             answer = geminiData.candidates[0].content.parts[0].text;
-          } else {
-            answer = "Странный ответ: " + JSON.stringify(geminiData);
+          } else if (geminiData.error) {
+            answer = "Ошибка от Google: " + geminiData.error.message;
           }
         } catch (aiError) {
-          answer = "Сбой кода: " + aiError.message;
+          answer = "Сбой запроса: " + aiError.message;
         }
 
         await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
