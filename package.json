@@ -1,7 +1,6 @@
 {
   "name": "626ai",
   "version": "1.0.0",
-  "description": "Telegram Gemini Bot",
-  "main": "api/index.js",
+  "private": true,
   "dependencies": {}
 }
