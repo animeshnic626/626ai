@@ -1,10 +1,12 @@
+import { GoogleGenAI } from "@google/genai";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(200).send("OK");
   }
 
   const TOKEN = "8658163234:AAHbbS8Y0PP-puPlGNpiM5AxAjsrIZJ_BrA";
-  const GEMINI_KEYS = process.env.GEMINI_API_KEYS;
+  const apiKey = process.env.GEMINI_API_KEYS;
 
   try {
     const update = req.body;
@@ -14,17 +16,24 @@ export default async function handler(req, res) {
       const text = message.text || message.caption || "";
 
       if (text) {
-        // Используем модель gemini-3.5-flash-lite
-        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_KEYS}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: text }] }]
-          })
-        });
+        let answer = "Извините, не удалось получить ответ.";
 
-        const geminiData = await geminiRes.json();
-        const answer = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "Извините, не удалось получить ответ.";
+        try {
+          // Инициализируем официальный клиент Google с вашим ключом AQ.
+          const ai = new GoogleGenAI({ apiKey: apiKey });
+          
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.5-flash-lite',
+            contents: text,
+          });
+
+          if (response && response.text) {
+            answer = response.text;
+          }
+        } catch (aiError) {
+          console.error("Ошибка от Gemini:", aiError);
+          answer = "Ошибка при обращении к нейросети: " + aiError.message;
+        }
 
         await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
           method: "POST",
@@ -36,7 +45,7 @@ export default async function handler(req, res) {
 
     return res.status(200).send("OK");
   } catch (error) {
-    console.error("Ошибка:", error);
+    console.error("Общая ошибка:", error);
     return res.status(200).send("OK");
   }
 }
