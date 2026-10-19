@@ -1,5 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(200).send("OK");
@@ -16,23 +14,30 @@ export default async function handler(req, res) {
       const text = message.text || message.caption || "";
 
       if (text) {
-        let answer = "Извините, не удалось получить ответ.";
+        let answer = "";
 
         try {
-          // Инициализируем официальный клиент Google с вашим ключом AQ.
-          const ai = new GoogleGenAI({ apiKey: apiKey });
-          
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.5-flash-lite',
-            contents: text,
+          // Пробуем универсальный прямой запрос через fetch с самой проверенной моделью gemini-2.0-flash
+          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: text }] }]
+            })
           });
 
-          if (response && response.text) {
-            answer = response.text;
+          const geminiData = await geminiRes.json();
+
+          // Если Google вернул ошибку, покажем её прямо в Telegram для теста
+          if (geminiData.error) {
+            answer = "Ошибка Google: " + geminiData.error.message;
+          } else if (geminiData.candidates && geminiData.candidates[0].content.parts[0].text) {
+            answer = geminiData.candidates[0].content.parts[0].text;
+          } else {
+            answer = "Странный ответ: " + JSON.stringify(geminiData);
           }
         } catch (aiError) {
-          console.error("Ошибка от Gemini:", aiError);
-          answer = "Ошибка при обращении к нейросети: " + aiError.message;
+          answer = "Сбой кода: " + aiError.message;
         }
 
         await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
@@ -45,7 +50,6 @@ export default async function handler(req, res) {
 
     return res.status(200).send("OK");
   } catch (error) {
-    console.error("Общая ошибка:", error);
     return res.status(200).send("OK");
   }
 }
