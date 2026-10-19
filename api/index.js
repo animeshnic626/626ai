@@ -14,7 +14,8 @@ export default async function handler(req, res) {
       const text = message.text || message.caption || "";
 
       if (text) {
-        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEYS}`, {
+        // Используем модель gemini-3.5-flash-lite
+        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_KEYS}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
