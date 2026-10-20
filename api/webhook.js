@@ -1,4 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
+import pkg from '@google/genai';
+const { GoogleGenAI } = pkg;
 
 // Инициализируем клиент (ключ автоматически берется из переменной GEMINI_API_KEY)
 const ai = new GoogleGenAI();
