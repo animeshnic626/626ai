@@ -1,12 +1,6 @@
 {
   "name": "626ai",
   "version": "1.0.0",
-  "description": "Telegram Gemini Bot on Vercel",
-  "type": "module",
-  "dependencies": {
-    "@google/genai": "^0.1.1"
-  },
-  "engines": {
-    "node": "22.x"
-  }
+  "private": true,
+  "type": "module"
 }
