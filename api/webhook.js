@@ -1,8 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-// Инициализируем клиент (ключ берется из GEMINI_API_KEY)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(200).send('Bot is running!');
@@ -11,18 +6,32 @@ export default async function handler(req, res) {
     try {
         const update = req.body;
 
+        // Проверяем, есть ли текстовое сообщение
         if (update.message && update.message.text) {
             const chatId = update.message.chat.id;
             const userText = update.message.text;
 
-            // Используем модель, которую запросил Google в ошибке
-            const model = genAI.getGenerativeModel({ model: 'gemini-3.8-flash' });
+            // 1. СРАЗУ отвечаем Telegram статусом 200 OK, чтобы он не дублировал запросы
+            res.status(200).json({ status: 'ok' });
 
-            const result = await model.generateContent(userText);
-            const response = await result.response;
-            const botReply = response.text() || 'Пустой ответ от модели.';
+            // 2. Делаем запрос к Gemini через чистый fetch
+            const apiKey = process.env.GEMINI_API_KEY;
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-            // Отправляем ответ в Telegram
+            const aiResponse = await fetch(geminiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{ text: userText }]
+                    }]
+                })
+            });
+
+            const aiData = await aiResponse.json();
+            const botReply = aiData.candidates?.[0]?.content?.parts?.[0]?.text || 'Извините, не удалось получить ответ от модели.';
+
+            // 3. Отправляем итоговый ответ обратно в Telegram
             const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
             const telegramUrl = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
 
@@ -34,11 +43,18 @@ export default async function handler(req, res) {
                     text: botReply,
                 }),
             });
+            
+            return; // Завершаем выполнение после успешной отправки
         }
 
-        return res.status(200).json({ status: 'ok' });
+        // Если пришло что-то другое (не текстовое сообщение)
+        return res.status(200).json({ status: 'ignored' });
+
     } catch (error) {
         console.error('Error handling update:', error);
-        return res.status(500).json({ error: error.message });
+        // Если ответ еще не отправлялся, возвращаем ошибку
+        if (!res.headersSent) {
+            return res.status(500).json({ error: error.message });
+        }
     }
 }
