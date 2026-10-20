@@ -14,9 +14,9 @@ export default async function handler(req, res) {
             // 1. СРАЗУ отвечаем Telegram статусом 200 OK, чтобы он не дублировал запросы
             res.status(200).json({ status: 'ok' });
 
-            // 2. Делаем запрос к Gemini через чистый fetch
+            // 2. Делаем запрос к Gemini с моделью gemini-3.1-flash-lite через чистый fetch
             const apiKey = process.env.GEMINI_API_KEY;
-            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
 
             const aiResponse = await fetch(geminiUrl, {
                 method: 'POST',
@@ -29,6 +29,8 @@ export default async function handler(req, res) {
             });
 
             const aiData = await aiResponse.json();
+            
+            // Безопасно достаем текст ответа
             const botReply = aiData.candidates?.[0]?.content?.parts?.[0]?.text || 'Извините, не удалось получить ответ от модели.';
 
             // 3. Отправляем итоговый ответ обратно в Telegram
@@ -44,15 +46,13 @@ export default async function handler(req, res) {
                 }),
             });
             
-            return; // Завершаем выполнение после успешной отправки
+            return;
         }
 
-        // Если пришло что-то другое (не текстовое сообщение)
         return res.status(200).json({ status: 'ignored' });
 
     } catch (error) {
         console.error('Error handling update:', error);
-        // Если ответ еще не отправлялся, возвращаем ошибку
         if (!res.headersSent) {
             return res.status(500).json({ error: error.message });
         }
