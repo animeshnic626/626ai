@@ -1,7 +1,8 @@
 const { Telegraf, Markup } = require('telegraf');
 
 // Бот подхватывает токен из переменных Vercel
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+
 
 // Ловим абсолютно любое текстовое сообщение или нажатие кнопки
 bot.on('text', async (ctx) => {
