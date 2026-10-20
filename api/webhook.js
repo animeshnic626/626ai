@@ -1,57 +1,24 @@
-export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        return res.status(200).send('Bot is running!');
+const { Telegraf, Markup } = require('telegraf');
+
+// Бот сам подхватит BOT_TOKEN из настроек окружения Vercel
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Ловим АБСОЛЮТНО любое текстовое сообщение (или нажатие старой кнопки)
+bot.on('text', async (ctx) => {
+  // Отправляем текст и полностью убираем кнопки с экрана
+  return ctx.reply('Кнопки успешно удалены!', Markup.removeKeyboard());
+});
+
+// Настройка моста, чтобы Vercel передавал сообщения в Telegraf
+module.exports = async (req, res) => {
+  try {
+    if (req.method === 'POST') {
+      await bot.handleUpdate(req.body, res);
+    } else {
+      res.status(200).send('Бот-пустышка успешно запущен!');
     }
-
-    try {
-        const update = req.body;
-
-        if (update.message && update.message.text) {
-            const chatId = update.message.chat.id;
-            const userText = update.message.text;
-
-            res.status(200).json({ status: 'ok' });
-
-            const apiKey = process.env.GEMINI_API_KEY;
-            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
-
-            const aiResponse = await fetch(geminiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: userText }] }]
-                })
-            });
-
-            const aiData = await aiResponse.json();
-            const botReply = aiData.candidates?.[0]?.content?.parts?.[0]?.text || 'Готово.';
-
-            const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-            const telegramUrl = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
-
-            // ОТДЕЛЬНЫЙ КОД ДЛЯ УДАЛЕНИЯ КНОПОК:
-            // Параметр remove_keyboard: true стирает клавиатуру с экрана пользователя
-            await fetch(telegramUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    text: botReply,
-                    reply_markup: {
-                        remove_keyboard: true
-                    }
-                }),
-            });
-            
-            return;
-        }
-
-        return res.status(200).json({ status: 'ignored' });
-
-    } catch (error) {
-        console.error('Error:', error);
-        if (!res.headersSent) {
-            return res.status(500).json({ error: error.message });
-        }
-    }
-}
+  } catch (error) {
+    console.error('Ошибка:', error);
+    res.status(500).send('Внутренняя ошибка');
+  }
+};
