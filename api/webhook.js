@@ -1,46 +1,47 @@
+import { GoogleGenAI } from '@google/genai';
+
+// Инициализируем клиент Google Gen AI (ключ берется автоматически из переменной среды GEMINI_API_KEY)
+const ai = new GoogleGenAI();
+
 export default async function handler(req, res) {
+  // Telegram присылает данные методом POST
   if (req.method !== 'POST') {
-    return res.status(200).send('Бот с кнопками работает!');
+    return res.status(200).send('Bot is running!');
   }
 
   try {
     const update = req.body;
 
-    if (update && update.message && update.message.text) {
+    // Проверяем, есть ли текстовое сообщение от пользователя
+    if (update.message && update.message.text) {
       const chatId = update.message.chat.id;
-      const text = update.message.text;
-      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const userText = update.message.text;
 
-      // Создаем визуальные кнопки, которые появятся внизу экрана
-      const replyKeyboard = {
-        keyboard: [
-          [
-            { text: "🚀 Кнопка 1" }, 
-            { text: "⭐ Кнопка 2" }
-          ],
-          [
-            { text: "💡 Помощь" }, 
-            { text: "🔄 Сброс" }
-          ]
-        ],
-        resize_keyboard: true, // Делает кнопки компактными
-        one_time_keyboard: false // Оставляет кнопки на экране постоянно
-      };
+      // Запрос к самой легкой и быстрой модели gemini-3.1-flash-lite
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: userText,
+      });
 
-      // Отправляем пользователю сообщение + наши кнопки
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      const botReply = response.text;
+
+      // Отправляем ответ обратно в Telegram
+      const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+      const telegramUrl = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
+
+      await fetch(telegramUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: `Ты написал: "${text}". А вот твои новые кнопки снизу 👇`,
-          reply_markup: replyKeyboard
+          text: botReply,
         }),
       });
     }
-  } catch (error) {
-    console.error('Ошибка:', error);
-  }
 
-  return res.status(200).json({ status: 'ok' });
+    return res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    console.error('Error handling update:', error);
+    return res.status(500).json({ error: error.message });
+  }
 }
