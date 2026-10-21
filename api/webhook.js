@@ -18,8 +18,8 @@ export default async function handler(req, res) {
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // Запрос к Google Gemini API
-    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    // Запрос к Google Gemini API (используем модель gemini-3.1-flash-lite)
+    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
       method: 'POST',
