@@ -52,7 +52,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // --- 2. ОБРАБОТКА КОМАНДЫ ДЛЯ КАРТИНОК (/image или /картинка) ---
+    // --- 2. ОБРАБОТКА КОМАНДЫ ДЛЯ КАРТИНОК (/image или /картинка) ЧЕРЕЗ NANO BANANA 2 ---
     if (userText.startsWith('/image') || userText.startsWith('/картинка')) {
       const promptText = userText.replace(/^\/(image|картинка)\s*/i, '').trim();
 
@@ -66,8 +66,8 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // Используем модель gemini-3-pro-image по официальному ID из документации
-      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image:generateContent?key=${GEMINI_API_KEY}`;
+      // Используем модель gemini-3.1-flash-image (Nano Banana 2) из документации
+      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_API_KEY}`;
       
       const imageResponse = await fetch(googleImageUrl, {
         method: 'POST',
@@ -82,14 +82,14 @@ export default async function handler(req, res) {
       const imageData = await imageResponse.json();
 
       if (!imageResponse.ok) {
-        console.error("Gemini Image API Error:", imageData);
+        console.error("Nano Banana 2 API Error:", imageData);
         const errorMsg = imageData.error?.message || "Ошибка генерации картинки";
         
         const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
         await fetch(telegramUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: `⚠️ Ошибка: ${errorMsg}` })
+          body: JSON.stringify({ chat_id: chatId, text: `⚠️ Ошибка Nano Banana 2: ${errorMsg}` })
         });
         return res.status(200).json({ ok: true });
       }
@@ -108,7 +108,7 @@ export default async function handler(req, res) {
         formData.append('chat_id', chatId);
         const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
         formData.append('photo', blob, 'image.jpg');
-        formData.append('caption', `🎨 ${promptText}`);
+        formData.append('caption', `🍌🎨 ${promptText}`);
 
         const telegramPhotoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
         await fetch(telegramPhotoUrl, {
@@ -122,7 +122,7 @@ export default async function handler(req, res) {
         await fetch(telegramUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '💥 Не удалось обработать или отправить картинку от модели.' })
+          body: JSON.stringify({ chat_id: chatId, text: '💥 Не удалось обработать или отправить картинку от Nano Banana 2.' })
         });
       }
 
