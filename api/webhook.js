@@ -21,11 +21,9 @@ export default async function handler(req, res) {
 
     // --- ТУМБЛЕР ПИНГА (включение / выключение по 🔥) ---
     if (userText === '🔥') {
-      // Меняем статус на противоположный (если был true, станет false, и наоборот)
       pingModes[chatId] = !pingModes[chatId];
       const isEnabled = pingModes[chatId];
 
-      // Ставим реакцию 🔥 на само сообщение с тумблером
       const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
       await fetch(reactionUrl, {
         method: 'POST',
@@ -37,7 +35,6 @@ export default async function handler(req, res) {
         })
       });
 
-      // Отправляем текстовое уведомление о статусе тумблера
       const statusText = isEnabled 
         ? "🟢 Режим пинга ВКЛЮЧЕН. Теперь на каждое сообщение будет ставиться реакция 🔥." 
         : "🔴 Режим пинга ВЫКЛЮЧЕН.";
@@ -52,14 +49,11 @@ export default async function handler(req, res) {
         })
       });
 
-      // ИИ не вызываем, просто завершаем запрос
       return res.status(200).json({ ok: true });
     }
-    // ----------------------------------------------------
 
     // --- ЕСЛИ РЕЖИМ ПИНГА ВКЛЮЧЕН ДЛЯ ЭТОГО ЧАТА ---
     if (pingModes[chatId]) {
-      // Сразу ставим реакцию 🔥 на любое ваше сообщение
       const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
       await fetch(reactionUrl, {
         method: 'POST',
@@ -71,9 +65,8 @@ export default async function handler(req, res) {
         })
       });
     }
-    // ----------------------------------------------
 
-    // Дальше идет стандартный запрос к ИИ (Gemini)
+    // --- ЗАПРОС К GEMINI С ОТКЛЮЧЕННЫМИ ФИЛЬТРАМИ БЕЗОПАСНОСТИ ---
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
@@ -81,7 +74,13 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: userText }] }]
+        contents: [{ parts: [{ text: userText }] }],
+        safety_settings: [
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" }
+        ]
       })
     });
 
