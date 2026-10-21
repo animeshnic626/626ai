@@ -1,3 +1,6 @@
+// Кэш для мгновенного поиска топиков без лишних запросов к Telegram API
+const userTopics = new Map();
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(200).json({ status: 'Bot is running!' });
@@ -23,7 +26,6 @@ export default async function handler(req, res) {
 
     const ALLOWED_GROUP_ID = -1004357166374; 
 
-    // Защита: игнорируем чужие группы, но разрешаем ЛС (private) и нашу группу
     if (chatId !== ALLOWED_GROUP_ID && message.chat.type !== 'private') {
       return res.status(200).json({ ok: true });
     }
@@ -59,49 +61,62 @@ export default async function handler(req, res) {
     let targetThreadId = message.message_thread_id;
 
     if (message.chat.type === 'private') {
-      const getTopicsUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getForumTopics?chat_id=${ALLOWED_GROUP_ID}`;
-      const topicsRes = await fetch(getTopicsUrl);
-      const topicsData = await topicsRes.json();
-      
-      console.log("Topics response:", JSON.stringify(topicsData));
+      // Сразу показываем статус "печатает...", чтобы убрать ощущение задержки
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, action: 'typing' })
+      });
 
-      let topicsList = [];
-      if (topicsData.ok && topicsData.result) {
-        if (Array.isArray(topicsData.result)) {
-          topicsList = topicsData.result;
-        } else if (topicsData.result.topics && Array.isArray(topicsData.result.topics)) {
-          topicsList = topicsData.result.topics;
-        }
-      }
-
-      let foundTopic = topicsList.find(topic => topic.name && topic.name.includes(`[${userId}]`));
-
-      if (foundTopic) {
-        targetThreadId = foundTopic.message_thread_id;
+      // Сначала проверяем локальный кэш
+      if (userTopics.has(userId)) {
+        targetThreadId = userTopics.get(userId);
       } else {
-        const createTopicUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createForumTopic`;
-        const createRes = await fetch(createTopicUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: ALLOWED_GROUP_ID,
-            name: `${userName} [${userId}]`
-          })
-        });
-        const createData = await createRes.json();
-        console.log("Create topic response:", JSON.stringify(createData));
+        // Если в кэше нет — запрашиваем список топиков у Telegram
+        const getTopicsUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getForumTopics?chat_id=${ALLOWED_GROUP_ID}`;
+        const topicsRes = await fetch(getTopicsUrl);
+        const topicsData = await topicsRes.json();
 
-        if (createData.ok && createData.result) {
-          targetThreadId = createData.result.message_thread_id;
+        let topicsList = [];
+        if (topicsData.ok && topicsData.result) {
+          if (Array.isArray(topicsData.result)) {
+            topicsList = topicsData.result;
+          } else if (topicsData.result.topics && Array.isArray(topicsData.result.topics)) {
+            topicsList = topicsData.result.topics;
+          }
+        }
+
+        let foundTopic = topicsList.find(topic => topic.name && topic.name.includes(`[${userId}]`));
+
+        if (foundTopic) {
+          targetThreadId = foundTopic.message_thread_id;
         } else {
-          console.error("Failed to create topic:", createData);
+          // Создаем новый топик только если его реально нет
+          const createTopicUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createForumTopic`;
+          const createRes = await fetch(createTopicUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: ALLOWED_GROUP_ID,
+              name: `${userName} [${userId}]`
+            })
+          });
+          const createData = await createRes.json();
+
+          if (createData.ok && createData.result) {
+            targetThreadId = createData.result.message_thread_id;
+          }
+        }
+
+        // Сохраняем в кэш
+        if (targetThreadId) {
+          userTopics.set(userId, targetThreadId);
         }
       }
 
-      // Дублируем сообщение пользователя в его персональный топик в группе
+      // Дублируем сообщение пользователя в его персональный топик
       if (targetThreadId) {
-        const forwardToGroupUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await fetch(forwardToGroupUrl, {
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -115,7 +130,7 @@ export default async function handler(req, res) {
     }
 
     // --- 3. ЗАПРОС К GEMINI ---
-const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
       method: 'POST',
@@ -137,11 +152,9 @@ const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemin
       console.error("Google API Error:", googleData);
       const errorMsg = googleData.error?.message || JSON.stringify(googleData);
 
-      const errorUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-      await fetch(errorUrl, {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.(`chatId`));
         body: JSON.stringify({
           chat_id: chatId,
           text: `⚠️ Google API Error: ${errorMsg}`,
@@ -160,9 +173,8 @@ const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemin
 
     // --- 4. ОТПРАВКА ОТВЕТА И ДУБЛИРОВАНИЕ ---
 
-    // 4.1. Отвечаем туда, откуда пришло сообщение
-    const replyUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    await fetch(replyUrl, {
+    // 4.1. Отвечаем пользователю
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -172,10 +184,9 @@ const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemin
       })
     });
 
-    // 4.2. Если сообщение было из ЛС, дублируем ответ бота в топик группы
+    // 4.2. Дублируем ответ бота в топик группы
     if (message.chat.type === 'private' && targetThreadId) {
-      const duplicateToGroupUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-      await fetch(duplicateToGroupUrl, {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
