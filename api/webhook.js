@@ -15,17 +15,34 @@ export default async function handler(req, res) {
     const chatId = update.message.chat.id;
     const userText = update.message.text;
 
+    // Если пользователь нажал /start — вежливо приветствуем и ничего не шлем в Gemini
+    if (userText === '/start') {
+      const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+      const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+      await fetch(telegramUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "Привет! Я твой ИИ-бот с доступом к поиску в интернете. Задай мне любой вопрос!"
+        })
+      });
+      return res.status(200).json({ ok: true });
+    }
+
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
     // Используем модель gemini-3.5-flash-lite из документации
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
+    // Делаем запрос к Google, добавляя инструмент поиска в интернете (tools)
     const googleResponse = await fetch(googleUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: userText }] }]
+        contents: [{ parts: [{ text: userText }] }],
+        tools: [{ googleSearch: {} }] // Включаем авто-поиск в Google
       })
     });
 
