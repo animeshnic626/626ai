@@ -13,12 +13,45 @@ export default async function handler(req, res) {
     }
 
     const chatId = update.message.chat.id;
-    const userText = update.message.text;
+    const messageId = update.message.message_id;
+    const userText = update.message.text.trim();
 
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // Используем модель gemini-3.5-flash-lite без лишних инструментов
+    // --- ПРОВЕРКА РЕЖИМА ПИНГА ---
+    // Проверяем, состоит ли сообщение РОВНО из одного смайлика 🔥
+    if (userText === '🔥') {
+      // 1. Ставим ответную реакцию «огонь» на сообщение пользователя
+      const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
+      await fetch(reactionUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reaction: [{ type: 'emoji', emoji: '🔥' }]
+        })
+      });
+
+      // 2. Отправляем короткое подтверждение пинга (или можно вообще убрать sendMessage, 
+      // если хотите проверять только по огоньку, но так понятнее, что бот "живой")
+      const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+      await fetch(telegramUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '🏓 Понг! Связь отличная, пинг протестирован.'
+        })
+      });
+
+      // Завершаем работу функции, чтобы ИИ даже не запускался и не тратил токены
+      return res.status(200).json({ ok: true });
+    }
+    // -----------------------------
+
+    // Дальше идет ваш обычный код для работы с Gemini, если это обычное сообщение
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
