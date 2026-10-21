@@ -1,5 +1,7 @@
+// Глобальная переменная для хранения статуса пинга по ID чатов
+const pingModes = {};
+
 export default async function handler(req, res) {
-  // Telegram присылает данные методом POST
   if (req.method !== 'POST') {
     return res.status(200).json({ status: 'Bot is running!' });
   }
@@ -7,7 +9,6 @@ export default async function handler(req, res) {
   try {
     const update = req.body;
 
-    // Проверяем, есть ли текстовое сообщение от пользователя
     if (!update.message || !update.message.text) {
       return res.status(200).json({ ok: true });
     }
@@ -18,10 +19,13 @@ export default async function handler(req, res) {
 
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-    // --- ПРОВЕРКА РЕЖИМА ПИНГА ---
-    // Проверяем, состоит ли сообщение РОВНО из одного смайлика 🔥
+    // --- ТУМБЛЕР ПИНГА (включение / выключение по 🔥) ---
     if (userText === '🔥') {
-      // 1. Ставим ответную реакцию «огонь» на сообщение пользователя
+      // Меняем статус на противоположный (если был true, станет false, и наоборот)
+      pingModes[chatId] = !pingModes[chatId];
+      const isEnabled = pingModes[chatId];
+
+      // Ставим реакцию 🔥 на само сообщение с тумблером
       const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
       await fetch(reactionUrl, {
         method: 'POST',
@@ -33,24 +37,43 @@ export default async function handler(req, res) {
         })
       });
 
-      // 2. Отправляем короткое подтверждение пинга (или можно вообще убрать sendMessage, 
-      // если хотите проверять только по огоньку, но так понятнее, что бот "живой")
+      // Отправляем текстовое уведомление о статусе тумблера
+      const statusText = isEnabled 
+        ? "🟢 Режим пинга ВКЛЮЧЕН. Теперь на каждое сообщение будет ставиться реакция 🔥." 
+        : "🔴 Режим пинга ВЫКЛЮЧЕН.";
+
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       await fetch(telegramUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: '🏓 Понг! Связь отличная, пинг протестирован.'
+          text: statusText
         })
       });
 
-      // Завершаем работу функции, чтобы ИИ даже не запускался и не тратил токены
+      // ИИ не вызываем, просто завершаем запрос
       return res.status(200).json({ ok: true });
     }
-    // -----------------------------
+    // ----------------------------------------------------
 
-    // Дальше идет ваш обычный код для работы с Gemini, если это обычное сообщение
+    // --- ЕСЛИ РЕЖИМ ПИНГА ВКЛЮЧЕН ДЛЯ ЭТОГО ЧАТА ---
+    if (pingModes[chatId]) {
+      // Сразу ставим реакцию 🔥 на любое ваше сообщение
+      const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
+      await fetch(reactionUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reaction: [{ type: 'emoji', emoji: '🔥' }]
+        })
+      });
+    }
+    // ----------------------------------------------
+
+    // Дальше идет стандартный запрос к ИИ (Gemini)
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
@@ -64,10 +87,8 @@ export default async function handler(req, res) {
 
     const googleData = await googleResponse.json();
     
-    // Если Google вернул ошибку, отправляем её в Telegram прямо в чат
     if (!googleResponse.ok) {
       console.error("Google API Error:", googleData);
-      
       const errorMsg = googleData.error?.message || JSON.stringify(googleData);
 
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -82,7 +103,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
     
-    // Достаем текст ответа от Google
     let replyText = "Извини, не удалось обработать ответ от Google.";
     try {
       replyText = googleData.candidates[0].content.parts[0].text;
@@ -90,7 +110,7 @@ export default async function handler(req, res) {
       console.error("Parse error:", googleData);
     }
 
-    // Отправляем ответ обратно в Telegram
+    // Отправляем ответ от ИИ обратно в Telegram
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     await fetch(telegramUrl, {
       method: 'POST',
@@ -105,7 +125,6 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error("Server Error:", error);
     
-    // Если упал сам серверный код
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     if (TELEGRAM_BOT_TOKEN && req.body?.message?.chat?.id) {
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
