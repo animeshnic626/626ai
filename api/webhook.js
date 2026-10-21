@@ -1,6 +1,3 @@
-// Глобальная переменная для хранения статуса пинга по ID чатов
-const pingModes = {};
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(200).json({ status: 'Bot is running!' });
@@ -9,21 +6,27 @@ export default async function handler(req, res) {
   try {
     const update = req.body;
 
-    if (!update.message || !update.message.text) {
+    // Поддерживаем как сообщения из ЛС, так и из групп/топиков
+    const message = update.message || update.channel_post;
+    if (!message || !message.text) {
       return res.status(200).json({ ok: true });
     }
 
-    const chatId = update.message.chat.id;
-    const messageId = update.message.message_id;
-    const userText = update.message.text.trim();
+    // ID основного чата/супергруппы
+    const chatId = message.chat.id;
+    const messageId = message.message_id;
+    const userText = message.text.trim();
+    
+    // Уникальный неизменяемый ID пользователя в Telegram
+    const userId = message.from.id;
+    const userName = message.from.first_name || `User ${userId}`;
 
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // --- ТУМБЛЕР ПИНГА (включение / выключение по 🔥) ---
+    // --- 1. ТУМБЛЕР ПИНГА (включение / выключение по 🔥) ---
+    // Глобальная переменная внутри функции для пинга
     if (userText === '🔥') {
-      pingModes[chatId] = !pingModes[chatId];
-      const isEnabled = pingModes[chatId];
-
       const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
       await fetch(reactionUrl, {
         method: 'POST',
@@ -34,10 +37,6 @@ export default async function handler(req, res) {
           reaction: [{ type: 'emoji', emoji: '🔥' }]
         })
       });
-
-      const statusText = isEnabled 
-        ? "🟢 Режим пинга ВКЛЮЧЕН. Теперь на каждое сообщение будет ставиться реакция 🔥." 
-        : "🔴 Режим пинга ВЫКЛЮЧЕН.";
 
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       await fetch(telegramUrl, {
@@ -45,29 +44,55 @@ export default async function handler(req, res) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: statusText
+          text: "🔥 Пинг-тест успешен!",
+          message_id: message.message_thread_id
         })
       });
 
       return res.status(200).json({ ok: true });
     }
 
-    // --- ЕСЛИ РЕЖИМ ПИНГА ВКЛЮЧЕН ДЛЯ ЭТОГО ЧАТА ---
-    if (pingModes[chatId]) {
-      const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
-      await fetch(reactionUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          message_id: messageId,
-          reaction: [{ type: 'emoji', emoji: '🔥' }]
-        })
-      });
+    // --- 2. ЛОГИКА ТОПИКОВ ПО ID ПОЛЬЗОВАТЕЛЯ ---
+    let targetThreadId = message.message_thread_id;
+
+    // Если сообщение написано боту в ЛС (не в группе с топиками), 
+    // то ищем или создаем персональный топик в вашей супергруппе (укажите ID вашей группы ниже, если нужно)
+    // Группа, где создаются топики (если бот принимает сообщения и в ЛС, и в группе)
+    const FORUM_GROUP_CHAT_ID = process.env.FORUM_GROUP_CHAT_ID || chatId; 
+
+    if (message.chat.type === 'private' && FORUM_GROUP_CHAT_ID) {
+      // Шаг А: Получаем список всех тем в группе
+      const getTopicsUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getForumTopics?chat_id=${FORUM_GROUP_CHAT_ID}`;
+      const topicsRes = await fetch(getTopicsUrl);
+      const topicsData = await topicsRes.json();
+
+      let foundTopic = null;
+      if (topicsData.ok && topicsData.result) {
+        // Ищем топик, в названии которого содержится ID пользователя
+        foundTopic = topicsData.result.find(topic => topic.name.includes(`[${userId}]`));
+      }
+
+      if (foundTopic) {
+        targetThreadId = foundTopic.message_thread_id;
+      } else {
+        // Шаг Б: Если топика нет — создаем новый на лету
+        const createTopicUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createForumTopic`;
+        const createRes = await fetch(createTopicUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: FORUM_GROUP_CHAT_ID,
+            name: `${userName} [${userId}]`
+          })
+        });
+        const createData = await createRes.json();
+        if (createData.ok) {
+          targetThreadId = createData.result.message_thread_id;
+        }
+      }
     }
 
-    // --- ЗАПРОС К GEMINI С ОТКЛЮЧЕННЫМИ ФИЛЬТРАМИ БЕЗОПАСНОСТИ ---
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    // --- 3. ЗАПРОС К GEMINI С ОТКЛЮЧЕННЫМИ ФИЛЬТРАМИ (OFF) ---
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
@@ -95,8 +120,9 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: chatId,
-          text: `⚠️ Google API Error: ${errorMsg}`
+          chat_id: FORUM_GROUP_CHAT_ID,
+          text: `⚠️ Google API Error: ${errorMsg}`,
+          message_thread_id: targetThreadId
         })
       });
       return res.status(200).json({ ok: true });
@@ -109,34 +135,22 @@ export default async function handler(req, res) {
       console.error("Parse error:", googleData);
     }
 
-    // Отправляем ответ от ИИ обратно в Telegram
+    // --- 4. ОТПРАВКА ОТВЕТА В НУЖНЫЙ ТОПИК ---
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     await fetch(telegramUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: chatId,
-        text: replyText
+        chat_id: FORUM_GROUP_CHAT_ID,
+        text: replyText,
+        message_thread_id: targetThreadId // Отправляем строго в ветку этого пользователя
       })
     });
 
     return res.status(200).json({ ok: true });
+
   } catch (error) {
     console.error("Server Error:", error);
-    
-    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    if (TELEGRAM_BOT_TOKEN && req.body?.message?.chat?.id) {
-      const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-      await fetch(telegramUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: req.body.message.chat.id,
-          text: `💥 Server Error: ${error.message}`
-        })
-      });
-    }
-
     return res.status(500).json({ error: error.message });
   }
 }
