@@ -56,23 +56,29 @@ export default async function handler(req, res) {
     }
 
     // --- 2. ЛОГИКА ТОПИКОВ (если пишут в ЛС) ---
-    let targetThreadId = message.message_thread_id; // если пишут в группе, то это ID текущей ветки
+    let targetThreadId = message.message_thread_id;
 
     if (message.chat.type === 'private') {
-      // Ищем топик пользователя в супергруппе
       const getTopicsUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getForumTopics?chat_id=${ALLOWED_GROUP_ID}`;
       const topicsRes = await fetch(getTopicsUrl);
       const topicsData = await topicsRes.json();
+      
+      console.log("Topics response:", JSON.stringify(topicsData));
 
-      let foundTopic = null;
+      let topicsList = [];
       if (topicsData.ok && topicsData.result) {
-        foundTopic = topicsData.result.find(topic => topic.name.includes(`[${userId}]`));
+        if (Array.isArray(topicsData.result)) {
+          topicsList = topicsData.result;
+        } else if (topicsData.result.topics && Array.isArray(topicsData.result.topics)) {
+          topicsList = topicsData.result.topics;
+        }
       }
+
+      let foundTopic = topicsList.find(topic => topic.name && topic.name.includes(`[${userId}]`));
 
       if (foundTopic) {
         targetThreadId = foundTopic.message_thread_id;
       } else {
-        // Если топика еще нет — создаем его на лету
         const createTopicUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createForumTopic`;
         const createRes = await fetch(createTopicUrl, {
           method: 'POST',
@@ -83,8 +89,12 @@ export default async function handler(req, res) {
           })
         });
         const createData = await createRes.json();
+        console.log("Create topic response:", JSON.stringify(createData));
+
         if (createData.ok && createData.result) {
           targetThreadId = createData.result.message_thread_id;
+        } else {
+          console.error("Failed to create topic:", createData);
         }
       }
 
@@ -104,8 +114,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // --- 3. ЗАПРОС К GEMINI С МАКСИМАЛЬНОЙ СВОБОДОЙ (OFF) ---
-    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    // --- 3. ЗАПРОС К GEMINI ---
+    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
       method: 'POST',
@@ -127,11 +137,11 @@ export default async function handler(req, res) {
       console.error("Google API Error:", googleData);
       const errorMsg = googleData.error?.message || JSON.stringify(googleData);
 
-      // Отправляем ошибку туда, куда писал пользователь
       const errorUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       await fetch(errorUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.(`chatId`));
         body: JSON.stringify({
           chat_id: chatId,
           text: `⚠️ Google API Error: ${errorMsg}`,
@@ -148,9 +158,9 @@ export default async function handler(req, res) {
       console.error("Parse error:", googleData);
     }
 
-    // --- 4. ОТПРАВКА ОТВЕТА ПОЛЬЗОВАТЕЛЮ И ДУБЛИРОВАНИЕ В ГРУППУ ---
+    // --- 4. ОТПРАВКА ОТВЕТА И ДУБЛИРОВАНИЕ ---
 
-    // 4.1. Отвечаем туда, откуда пришло сообщение (в ЛС или в группу)
+    // 4.1. Отвечаем туда, откуда пришло сообщение
     const replyUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     await fetch(replyUrl, {
       method: 'POST',
@@ -162,7 +172,7 @@ export default async function handler(req, res) {
       })
     });
 
-    // 4.2. Если сообщение было из ЛС, дублируем ответ бота еще и в топик группы
+    // 4.2. Если сообщение было из ЛС, дублируем ответ бота в топик группы
     if (message.chat.type === 'private' && targetThreadId) {
       const duplicateToGroupUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       await fetch(duplicateToGroupUrl, {
