@@ -2,7 +2,6 @@
 const pingModes = {};
 
 export default async function handler(req, res) {
-  // Telegram присылает данные методом POST
   if (req.method !== 'POST') {
     return res.status(200).json({ status: 'Bot is running!' });
   }
@@ -10,7 +9,6 @@ export default async function handler(req, res) {
   try {
     const update = req.body;
 
-    // Проверяем, есть ли текстовое сообщение от пользователя
     if (!update.message || !update.message.text) {
       return res.status(200).json({ ok: true });
     }
@@ -20,13 +18,14 @@ export default async function handler(req, res) {
     const userText = update.message.text.trim();
 
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // --- 1. ТУМБЛЕР ПИНГА (по 🔥) ---
+    // --- ТУМБЛЕР ПИНГА (включение / выключение по 🔥) ---
     if (userText === '🔥') {
+      // Меняем статус на противоположный (если был true, станет false, и наоборот)
       pingModes[chatId] = !pingModes[chatId];
       const isEnabled = pingModes[chatId];
 
+      // Ставим реакцию 🔥 на само сообщение с тумблером
       const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
       await fetch(reactionUrl, {
         method: 'POST',
@@ -38,6 +37,7 @@ export default async function handler(req, res) {
         })
       });
 
+      // Отправляем текстовое уведомление о статусе тумблера
       const statusText = isEnabled 
         ? "🟢 Режим пинга ВКЛЮЧЕН. Теперь на каждое сообщение будет ставиться реакция 🔥." 
         : "🔴 Режим пинга ВЫКЛЮЧЕН.";
@@ -46,91 +46,20 @@ export default async function handler(req, res) {
       await fetch(telegramUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: statusText })
-      });
-
-      return res.status(200).json({ ok: true });
-    }
-
-    // --- 2. ОБРАБОТКА КОМАНДЫ ДЛЯ КАРТИНОК (/image или /картинка) ЧЕРЕЗ NANO BANANA 2 ---
-    if (userText.startsWith('/image') || userText.startsWith('/картинка')) {
-      const promptText = userText.replace(/^\/(image|картинка)\s*/i, '').trim();
-
-      if (!promptText) {
-        const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await fetch(telegramUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '⚠️ Напиши описание картинки после команды, например: /image кот в шляпе' })
-        });
-        return res.status(200).json({ ok: true });
-      }
-
-      // Используем модель gemini-3.1-flash-image (Nano Banana 2) из документации
-      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_API_KEY}`;
-      
-      const imageResponse = await fetch(googleImageUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{
-            parts: [{ text: promptText }]
-          }]
+          chat_id: chatId,
+          text: statusText
         })
       });
 
-      const imageData = await imageResponse.json();
-
-      if (!imageResponse.ok) {
-        console.error("Nano Banana 2 API Error:", imageData);
-        const errorMsg = imageData.error?.message || "Ошибка генерации картинки";
-        
-        const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await fetch(telegramUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: `⚠️ Ошибка Nano Banana 2: ${errorMsg}` })
-        });
-        return res.status(200).json({ ok: true });
-      }
-
-      try {
-        const part = imageData.candidates[0].content.parts.find(p => p.inlineData || p.inline_data);
-        const base64Data = part.inlineData?.data || part.inline_data?.data;
-
-        if (!base64Data) {
-          throw new Error("Модель не вернула данные изображения в ответе.");
-        }
-
-        const imageBuffer = Buffer.from(base64Data, 'base64');
-
-        const formData = new FormData();
-        formData.append('chat_id', chatId);
-        const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
-        formData.append('photo', blob, 'image.jpg');
-        formData.append('caption', `🍌🎨 ${promptText}`);
-
-        const telegramPhotoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
-        await fetch(telegramPhotoUrl, {
-          method: 'POST',
-          body: formData
-        });
-
-      } catch (err) {
-        console.error("Image parse/send error:", err, imageData);
-        const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await fetch(telegramUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '💥 Не удалось обработать или отправить картинку от Nano Banana 2.' })
-        });
-      }
-
+      // ИИ не вызываем, просто завершаем запрос
       return res.status(200).json({ ok: true });
     }
+    // ----------------------------------------------------
 
-    // --- 3. РЕЖИМ ПИНГА ДЛЯ ОБЫЧНЫХ СООБЩЕНИЙ ---
+    // --- ЕСЛИ РЕЖИМ ПИНГА ВКЛЮЧЕН ДЛЯ ЭТОГО ЧАТА ---
     if (pingModes[chatId]) {
+      // Сразу ставим реакцию 🔥 на любое ваше сообщение
       const reactionUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction`;
       await fetch(reactionUrl, {
         method: 'POST',
@@ -142,8 +71,10 @@ export default async function handler(req, res) {
         })
       });
     }
+    // ----------------------------------------------
 
-    // --- 4. ОБЫЧНЫЙ ТЕКСТОВЫЙ ЗАПРОС К GEMINI ---
+    // Дальше идет стандартный запрос к ИИ (Gemini)
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
@@ -164,7 +95,10 @@ export default async function handler(req, res) {
       await fetch(telegramUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: `⚠️ Google API Error: ${errorMsg}` })
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `⚠️ Google API Error: ${errorMsg}`
+        })
       });
       return res.status(200).json({ ok: true });
     }
@@ -176,15 +110,18 @@ export default async function handler(req, res) {
       console.error("Parse error:", googleData);
     }
 
+    // Отправляем ответ от ИИ обратно в Telegram
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     await fetch(telegramUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: replyText })
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: replyText
+      })
     });
 
     return res.status(200).json({ ok: true });
-
   } catch (error) {
     console.error("Server Error:", error);
     
