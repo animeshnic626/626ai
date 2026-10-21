@@ -66,8 +66,8 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // Используем модель gemini-2.5-flash-image через стандартный generateContent
-      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_API_KEY}`;
+      // Используем модель gemini-nano-banana-2.1 через стандартный generateContent
+      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-nano-banana-2.1:generateContent?key=${GEMINI_API_KEY}`;
       
       const imageResponse = await fetch(googleImageUrl, {
         method: 'POST',
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
       const imageData = await imageResponse.json();
 
       if (!imageResponse.ok) {
-        console.error("Gemini Image API Error:", imageData);
+        console.error("Nano Banana API Error:", imageData);
         const errorMsg = imageData.error?.message || "Ошибка генерации картинки";
         
         const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
