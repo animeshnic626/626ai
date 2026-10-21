@@ -18,26 +18,23 @@ export default async function handler(req, res) {
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // Используем модель gemini-3.5-flash-lite, как вы и хотели
+    // Используем модель gemini-3.5-flash-lite без лишних инструментов
     const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: userText }] }],
-        // Инструмент поиска включен
-        tools: [{ "googleSearch": {} }]
+        contents: [{ parts: [{ text: userText }] }]
       })
     });
 
     const googleData = await googleResponse.json();
     
-    // Если Google вернул ошибку, отправляем её в Telegram в чистом виде для отладки
+    // Если Google вернул ошибку, отправляем её в Telegram прямо в чат
     if (!googleResponse.ok) {
       console.error("Google API Error:", googleData);
       
-      // Достаем текст ошибки из ответа Google, если он есть
       const errorMsg = googleData.error?.message || JSON.stringify(googleData);
 
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
