@@ -66,61 +66,79 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // Отправляем запрос к Imagen API (используем модель imagen-3.0-generate-002)
-      const imagenUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`;
+     // --- ОБРАБОТКА КОМАНДЫ ДЛЯ КАРТИНОК (/image или /картинка) ---
+    if (userText.startsWith('/image') || userText.startsWith('/картинка')) {
+      const promptText = userText.replace(/^\/(image|картинка)\s*/i, '').trim();
+
+      if (!promptText) {
+        const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+        await fetch(telegramUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: '⚠️ Напиши описание картинки после команды, например: /image кот в шляпе' })
+        });
+        return res.status(200).json({ ok: true });
+      }
+
+      // Используем модель gemini-2.5-flash-image через стандартный generateContent
+      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_API_KEY}`;
       
-      const imagenResponse = await fetch(imagenUrl, {
+      const imageResponse = await fetch(googleImageUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          instances: [{ prompt: promptText }],
-          parameters: { sampleCount: 1, aspectRatio: "1:1" }
+          contents: [{
+            parts: [{ text: promptText }]
+          }]
         })
       });
 
-      const imagenData = await imagenResponse.json();
+      const imageData = await imageResponse.json();
 
-      if (!imagenResponse.ok) {
-        console.error("Imagen API Error:", imagenData);
-        const errorMsg = imagenData.error?.message || "Ошибка генерации изображения";
+      if (!imageResponse.ok) {
+        console.error("Gemini Image API Error:", imageData);
+        const errorMsg = imageData.error?.message || "Ошибка генерации картинки";
         
         const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
         await fetch(telegramUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: `⚠️ Ошибка картинки: ${errorMsg}` })
+          body: JSON.stringify({ chat_id: chatId, text: `⚠️ Ошибка: ${errorMsg}` })
         });
         return res.status(200).json({ ok: true });
       }
 
       try {
-        // Google возвращает картинку в формате base64
-        const base64Image = imagenData.predictions[0].bytesBase64Encoded;
-        const imageBuffer = Buffer.from(base64Image, 'base64');
+        // Достаем картинку из ответа мультимодальной модели (структура ответа стандартизирована под Gemini)
+        const part = imageData.candidates[0].content.parts.find(p => p.inlineData || p.inline_data);
+        const base64Data = part.inlineData?.data || part.inline_data?.data;
 
-        // Отправляем фото в Telegram с помощью FormData / отправки файла
-        // В Node.js на серверless-функциях проще отправить через Telegram метод sendPhoto с buffer, 
-        // но так как стандартный fetch требует FormData для файлов, сформируем его:
+        if (!base64Data) {
+          throw new Error("Модель не вернула данные изображения в ответе.");
+        }
+
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+
+        // Отправляем фото в Telegram
         const formData = new FormData();
         formData.append('chat_id', chatId);
-        // Создаем виртуальный файл из Buffer для отправки
         const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
         formData.append('photo', blob, 'image.jpg');
-        formData.append('caption', `🎨 Промпт: ${promptText}`);
+        formData.append('caption', `🎨 ${promptText}`);
 
         const telegramPhotoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
         await fetch(telegramPhotoUrl, {
           method: 'POST',
-          body: formData // передаем без заголовка Content-Type, fetch сам проставит границы мультиварта
+          body: formData
         });
 
       } catch (err) {
-        console.error("Image parse/send error:", err);
+        console.error("Image parse/send error:", err, imageData);
         const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
         await fetch(telegramUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '💥 Не удалось отправить сгенерированную картинку.' })
+          body: JSON.stringify({ chat_id: chatId, text: '💥 Не удалось обработать или отправить картинку от модели.' })
         });
       }
 
