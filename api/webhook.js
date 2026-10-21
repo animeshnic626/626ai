@@ -2,6 +2,7 @@
 const pingModes = {};
 
 export default async function handler(req, res) {
+  // Telegram присылает данные методом POST
   if (req.method !== 'POST') {
     return res.status(200).json({ status: 'Bot is running!' });
   }
@@ -9,6 +10,7 @@ export default async function handler(req, res) {
   try {
     const update = req.body;
 
+    // Проверяем, есть ли текстовое сообщение от пользователя
     if (!update.message || !update.message.text) {
       return res.status(200).json({ ok: true });
     }
@@ -37,7 +39,7 @@ export default async function handler(req, res) {
       });
 
       const statusText = isEnabled 
-        ? "🟢 Режим пинга ВКЛЮЧЕН." 
+        ? "🟢 Режим пинга ВКЛЮЧЕН. Теперь на каждое сообщение будет ставиться реакция 🔥." 
         : "🔴 Режим пинга ВЫКЛЮЧЕН.";
 
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -51,22 +53,6 @@ export default async function handler(req, res) {
     }
 
     // --- 2. ОБРАБОТКА КОМАНДЫ ДЛЯ КАРТИНОК (/image или /картинка) ---
-    if (userText.startsWith('/image') || userText.startsWith('/картинка')) {
-      // Достаем текст промпта (все, что идет после команды)
-      const promptText = userText.replace(/^\/(image|картинка)\s*/i, '').trim();
-
-      if (!promptText) {
-        // Если написали просто /image без описания
-        const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await fetch(telegramUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '⚠️ Напиши описание картинки после команды, например: /image кот в шляпе' })
-        });
-        return res.status(200).json({ ok: true });
-      }
-
-     // --- ОБРАБОТКА КОМАНДЫ ДЛЯ КАРТИНОК (/image или /картинка) ---
     if (userText.startsWith('/image') || userText.startsWith('/картинка')) {
       const promptText = userText.replace(/^\/(image|картинка)\s*/i, '').trim();
 
@@ -109,7 +95,6 @@ export default async function handler(req, res) {
       }
 
       try {
-        // Достаем картинку из ответа мультимодальной модели (структура ответа стандартизирована под Gemini)
         const part = imageData.candidates[0].content.parts.find(p => p.inlineData || p.inline_data);
         const base64Data = part.inlineData?.data || part.inline_data?.data;
 
@@ -119,7 +104,6 @@ export default async function handler(req, res) {
 
         const imageBuffer = Buffer.from(base64Data, 'base64');
 
-        // Отправляем фото в Telegram
         const formData = new FormData();
         formData.append('chat_id', chatId);
         const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
