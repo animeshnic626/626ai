@@ -66,23 +66,22 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // Используем модель gemini-nano-banana-2.1 через стандартный generateContent
-      const googleImageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-nano-banana-2.1:generateContent?key=${GEMINI_API_KEY}`;
+      // Используем официальную модель Imagen 3 для генерации изображений
+      const imagenUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`;
       
-      const imageResponse = await fetch(googleImageUrl, {
+      const imageResponse = await fetch(imagenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{
-            parts: [{ text: promptText }]
-          }]
+          instances: [{ prompt: promptText }],
+          parameters: { sampleCount: 1, aspectRatio: "1:1" }
         })
       });
 
       const imageData = await imageResponse.json();
 
       if (!imageResponse.ok) {
-        console.error("Nano Banana API Error:", imageData);
+        console.error("Imagen API Error:", imageData);
         const errorMsg = imageData.error?.message || "Ошибка генерации картинки";
         
         const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -95,8 +94,7 @@ export default async function handler(req, res) {
       }
 
       try {
-        const part = imageData.candidates[0].content.parts.find(p => p.inlineData || p.inline_data);
-        const base64Data = part.inlineData?.data || part.inline_data?.data;
+        const base64Data = imageData.predictions[0].bytesBase64Encoded;
 
         if (!base64Data) {
           throw new Error("Модель не вернула данные изображения в ответе.");
