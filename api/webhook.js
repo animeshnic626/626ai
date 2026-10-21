@@ -21,9 +21,9 @@ export default async function handler(req, res) {
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // --- 0. ПРИВЯЗКА К ВАШЕЙ ГРУППЕ ---
     const ALLOWED_GROUP_ID = -1004357166374; 
 
+    // Защита: игнорируем чужие группы, но разрешаем ЛС (private) и нашу группу
     if (chatId !== ALLOWED_GROUP_ID && message.chat.type !== 'private') {
       return res.status(200).json({ ok: true });
     }
@@ -55,10 +55,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // --- 2. ЛОГИКА ТОПИКОВ ПО ID ПОЛЬЗОВАТЕЛЯ ---
-    let targetThreadId = message.message_thread_id;
+    // --- 2. ЛОГИКА ТОПИКОВ (если пишут в ЛС) ---
+    let targetThreadId = message.message_thread_id; // если пишут в группе, то это ID текущей ветки
 
     if (message.chat.type === 'private') {
+      // Ищем топик пользователя в супергруппе
       const getTopicsUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getForumTopics?chat_id=${ALLOWED_GROUP_ID}`;
       const topicsRes = await fetch(getTopicsUrl);
       const topicsData = await topicsRes.json();
@@ -71,7 +72,7 @@ export default async function handler(req, res) {
       if (foundTopic) {
         targetThreadId = foundTopic.message_thread_id;
       } else {
-        // Создаем топик, если его еще не было
+        // Если топика еще нет — создаем его на лету
         const createTopicUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createForumTopic`;
         const createRes = await fetch(createTopicUrl, {
           method: 'POST',
@@ -82,22 +83,25 @@ export default async function handler(req, res) {
           })
         });
         const createData = await createRes.json();
-        if (createData.ok) {
+        if (createData.ok && createData.result) {
           targetThreadId = createData.result.message_thread_id;
         }
       }
 
-      // Если пользователь написал в ЛС, дублируем/пересылаем его сообщение в его топик в группе
-      const forwardUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-      await fetch(forwardUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: ALLOWED_GROUP_ID,
-          text: `💬 Сообщение от ${userName}:\n> ${userText}`,
-          message_thread_id: targetThreadId
-        })
-      });
+      // Дублируем сообщение пользователя в его персональный топик в группе
+      if (targetThreadId) {
+        const forwardToGroupUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+        await fetch(forwardToGroupUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: ALLOWED_GROUP_ID,
+            text: `👤 **${userName}** (из ЛС):\n> ${userText}`,
+            message_thread_id: targetThreadId,
+            parse_mode: "Markdown"
+          })
+        });
+      }
     }
 
     // --- 3. ЗАПРОС К GEMINI С МАКСИМАЛЬНОЙ СВОБОДОЙ (OFF) ---
@@ -123,18 +127,17 @@ export default async function handler(req, res) {
       console.error("Google API Error:", googleData);
       const errorMsg = googleData.error?.message || JSON.stringify(googleData);
 
-      if (targetThreadId) {
-        const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await fetch(telegramUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: ALLOWED_GROUP_ID,
-            text: `⚠️ Google API Error: ${errorMsg}`,
-            message_thread_id: targetThreadId
-          })
-        });
-      }
+      // Отправляем ошибку туда, куда писал пользователь
+      const errorUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+      await fetch(errorUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `⚠️ Google API Error: ${errorMsg}`,
+          message_thread_id: message.message_thread_id
+        })
+      });
       return res.status(200).json({ ok: true });
     }
     
@@ -145,16 +148,31 @@ export default async function handler(req, res) {
       console.error("Parse error:", googleData);
     }
 
-    // --- 4. ОТПРАВКА ОТВЕТА БОТА В ТОТ ЖЕ ТОПИК ---
-    if (targetThreadId) {
-      const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-      await fetch(telegramUrl, {
+    // --- 4. ОТПРАВКА ОТВЕТА ПОЛЬЗОВАТЕЛЮ И ДУБЛИРОВАНИЕ В ГРУППУ ---
+
+    // 4.1. Отвечаем туда, откуда пришло сообщение (в ЛС или в группу)
+    const replyUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    await fetch(replyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: replyText,
+        message_thread_id: message.message_thread_id
+      })
+    });
+
+    // 4.2. Если сообщение было из ЛС, дублируем ответ бота еще и в топик группы
+    if (message.chat.type === 'private' && targetThreadId) {
+      const duplicateToGroupUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+      await fetch(duplicateToGroupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: ALLOWED_GROUP_ID,
-          text: replyText,
-          message_thread_id: targetThreadId
+          text: `🤖 **Ответ бота:**\n${replyText}`,
+          message_thread_id: targetThreadId,
+          parse_mode: "Markdown"
         })
       });
     }
