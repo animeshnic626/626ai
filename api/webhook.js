@@ -18,8 +18,8 @@ export default async function handler(req, res) {
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // Запрос к Google Gemini API (используем модель gemini-3.1-flash-lite)
-    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    // Используем модель gemini-3.5-flash-lite из документации
+    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     
     const googleResponse = await fetch(googleUrl, {
       method: 'POST',
@@ -31,8 +31,24 @@ export default async function handler(req, res) {
 
     const googleData = await googleResponse.json();
     
+    // Если Google вернул ошибку, пишем её в лог и говорим пользователю
+    if (!googleResponse.ok) {
+      console.error("Google API Error:", googleData);
+      
+      const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+      await fetch(telegramUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "Ой, Google сейчас перегружен. Попробуй еще раз через секунду!"
+        })
+      });
+      return res.status(200).json({ ok: true });
+    }
+    
     // Достаем текст ответа от Google
-    let replyText = "Извини, не удалось получить ответ от Google.";
+    let replyText = "Извини, не удалось обработать ответ от Google.";
     try {
       replyText = googleData.candidates[0].content.parts[0].text;
     } catch (e) {
@@ -52,7 +68,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Server Error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
