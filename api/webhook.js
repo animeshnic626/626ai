@@ -1,3 +1,56 @@
+import fs from 'fs/promises';
+import path from 'path';
+
+const TOPICS_FILE = path.join(process.cwd(), 'topics.json');
+
+async function readTopics() {
+  try {
+    const data = await fs.readFile(TOPICS_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function writeTopics(data) {
+  await fs.writeFile(TOPICS_FILE, JSON.stringify(data, null, 2));
+}
+
+async function getOrCreateTopic(chatId, userId, firstName, username) {
+  const topics = await readTopics();
+  const key = `${chatId}:${userId}`;
+
+  if (topics[key]) {
+    return topics[key];
+  }
+
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const name = `${firstName || username || 'User'} (${userId})`;
+
+  const createResp = await fetch(`https://api.telegram.org/bot${token}/createForumTopic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      name,
+      icon_color: 0x00FF00
+    })
+  });
+
+  const createData = await createResp.json();
+
+  if (!createResp.ok || !createData.ok) {
+    throw new Error(createData?.description || 'Failed to create forum topic');
+  }
+
+  const topicId = createData.result.message_thread_id;
+
+  topics[key] = topicId;
+  await writeTopics(topics);
+
+  return topicId;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     return res.status(200).json({ ok: true, status: 'Bot is running' });
@@ -17,8 +70,11 @@ export default async function handler(req, res) {
 
     const text = String(message.text || message.caption || '').trim();
     const chatId = message.chat?.id;
+    const userId = message.from?.id;
+    const firstName = message.from?.first_name || '';
+    const username = message.from?.username || '';
 
-    if (!chatId || !text) {
+    if (!chatId || !userId || !text) {
       return res.status(200).json({ ok: true, status: 'Empty message' });
     }
 
@@ -32,6 +88,8 @@ export default async function handler(req, res) {
         error: 'Missing TELEGRAM_BOT_TOKEN or GEMINI_API_KEY in environment'
       });
     }
+
+    const topicId = await getOrCreateTopic(chatId, userId, firstName, username);
 
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${geminiApiKey}`,
@@ -61,6 +119,7 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
+        message_thread_id: topicId,
         text: reply
       })
     });
@@ -71,7 +130,7 @@ export default async function handler(req, res) {
       throw new Error(telegramData?.description || 'Telegram sendMessage failed');
     }
 
-    return res.status(200).json({ ok: true, reply });
+    return res.status(200).json({ ok: true, reply, topicId, userId });
   } catch (error) {
     console.error('Telegram bot error:', error);
     return res.status(500).json({
