@@ -17,7 +17,6 @@ export default async function handler(req, res) {
 
     const text = String(message.text || message.caption || '').trim();
     const chatId = message.chat?.id;
-    const messageId = message.message_id;
 
     if (!chatId || !text) {
       return res.status(200).json({ ok: true, status: 'Empty message' });
@@ -34,9 +33,6 @@ export default async function handler(req, res) {
       });
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${geminiApiKey}`,
       {
@@ -44,19 +40,11 @@ export default async function handler(req, res) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text }] }]
-        }),
-        signal: controller.signal
+        })
       }
     );
 
-    clearTimeout(timeout);
-
-    let geminiData;
-    try {
-      geminiData = await geminiResponse.json();
-    } catch (error) {
-      throw new Error('Invalid JSON response from Gemini API');
-    }
+    const geminiData = await geminiResponse.json();
 
     if (!geminiResponse.ok) {
       throw new Error(geminiData?.error?.message || 'Gemini API error');
@@ -73,18 +61,11 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: reply,
-        reply_to_message_id: messageId,
-        disable_web_page_preview: true
+        text: reply
       })
     });
 
-    let telegramData;
-    try {
-      telegramData = await telegramResponse.json();
-    } catch (error) {
-      throw new Error('Invalid JSON response from Telegram API');
-    }
+    const telegramData = await telegramResponse.json();
 
     if (!telegramResponse.ok || !telegramData.ok) {
       throw new Error(telegramData?.description || 'Telegram sendMessage failed');
