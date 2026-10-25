@@ -1,5 +1,8 @@
 {
-  "name": "telegram-gemini-bot",
-  "version": "1.0.0",
-  "private": true
+  "name": "626ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  }
 }

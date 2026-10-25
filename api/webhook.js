@@ -1,20 +1,25 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
+  if (req.method === 'GET') {
     return res.status(200).json({ ok: true, status: 'Bot is running' });
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
 
   try {
     const update = req.body || {};
     const message = update.message || update.edited_message || update.channel_post;
 
-    if (!message || !message.text) {
-      return res.status(200).json({ ok: true, status: 'No text message' });
+    if (!message) {
+      return res.status(200).json({ ok: true, status: 'No Telegram update' });
     }
 
+    const text = String(message.text || message.caption || '').trim();
     const chatId = message.chat?.id;
-    const userText = String(message.text || '').trim();
+    const messageId = message.message_id;
 
-    if (!chatId || !userText) {
+    if (!chatId || !text) {
       return res.status(200).json({ ok: true, status: 'Empty message' });
     }
 
@@ -29,11 +34,33 @@ export default async function handler(req, res) {
       });
     }
 
-    const reply = await generateGeminiReply({
-      apiKey: geminiApiKey,
-      model: geminiModel,
-      prompt: userText
-    });
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${geminiApiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text }]
+            }
+          ]
+        })
+      }
+    );
+
+    const geminiData = await geminiResponse.json();
+
+    if (!geminiResponse.ok) {
+      throw new Error(geminiData?.error?.message || 'Gemini API error');
+    }
+
+    const reply =
+      geminiData?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text || '')
+        .join('')
+        .trim() || 'Не удалось получить ответ от модели.';
 
     await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
       method: 'POST',
@@ -41,44 +68,16 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         chat_id: chatId,
         text: reply,
-        reply_to_message_id: message.message_id
+        reply_to_message_id: messageId
       })
     });
 
     return res.status(200).json({ ok: true, reply });
   } catch (error) {
-    console.error('Bot error:', error);
+    console.error('Telegram bot error:', error);
     return res.status(500).json({
       ok: false,
       error: error.message || 'Unknown error'
     });
   }
-}
-
-async function generateGeminiReply({ apiKey, model, prompt }) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        role: 'user',
-        parts: [{ text: prompt }]
-      }]
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error?.message || 'Gemini API error');
-  }
-
-  return (
-    data?.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text || '')
-      .join('')
-      .trim() || 'Не удалось получить ответ от модели.'
-  );
 }
