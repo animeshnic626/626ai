@@ -16,23 +16,22 @@ async function writeTopics(data) {
   await fs.writeFile(TOPICS_FILE, JSON.stringify(data, null, 2));
 }
 
-async function getOrCreateTopic(chatId, userId, firstName, username) {
+async function getOrCreateTopic(chatId, topicName) {
   const topics = await readTopics();
-  const key = `${chatId}:${userId}`;
+  const key = `${chatId}:${topicName}`;
 
   if (topics[key]) {
     return topics[key];
   }
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const name = `${firstName || username || 'User'} (${userId})`;
 
   const createResp = await fetch(`https://api.telegram.org/bot${token}/createForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      name,
+      name: topicName,
       icon_color: 0x00FF00
     })
   });
@@ -40,11 +39,10 @@ async function getOrCreateTopic(chatId, userId, firstName, username) {
   const createData = await createResp.json();
 
   if (!createResp.ok || !createData.ok) {
-    throw new Error(createData?.description || 'Failed to create forum topic');
+    throw new Error(createData?.description || `Failed to create topic: ${topicName}`);
   }
 
   const topicId = createData.result.message_thread_id;
-
   topics[key] = topicId;
   await writeTopics(topics);
 
@@ -70,67 +68,43 @@ export default async function handler(req, res) {
 
     const text = String(message.text || message.caption || '').trim();
     const chatId = message.chat?.id;
-    const userId = message.from?.id;
-    const firstName = message.from?.first_name || '';
-    const username = message.from?.username || '';
 
-    if (!chatId || !userId || !text) {
+    if (!chatId || !text) {
       return res.status(200).json({ ok: true, status: 'Empty message' });
     }
 
     const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-
-    if (!telegramToken || !geminiApiKey) {
+    if (!telegramToken) {
       return res.status(500).json({
         ok: false,
-        error: 'Missing TELEGRAM_BOT_TOKEN or GEMINI_API_KEY in environment'
+        error: 'Missing TELEGRAM_BOT_TOKEN in environment'
       });
     }
 
-    const topicId = await getOrCreateTopic(chatId, userId, firstName, username);
+    if (/626/i.test(text)) {
+      const topicName = '626';
+      const topicId = await getOrCreateTopic(chatId, topicName);
 
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${geminiApiKey}`,
-      {
+      const telegramResponse = await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text }] }]
+          chat_id: chatId,
+          message_thread_id: topicId,
+          text: `Топик "${topicName}" создан.`
         })
+      });
+
+      const telegramData = await telegramResponse.json();
+
+      if (!telegramResponse.ok || !telegramData.ok) {
+        throw new Error(telegramData?.description || 'Telegram sendMessage failed');
       }
-    );
 
-    const geminiData = await geminiResponse.json();
-
-    if (!geminiResponse.ok) {
-      throw new Error(geminiData?.error?.message || 'Gemini API error');
+      return res.status(200).json({ ok: true, topicName, topicId });
     }
 
-    const reply =
-      geminiData?.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text || '')
-        .join('')
-        .trim() || 'Не удалось получить ответ от модели.';
-
-    const telegramResponse = await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_thread_id: topicId,
-        text: reply
-      })
-    });
-
-    const telegramData = await telegramResponse.json();
-
-    if (!telegramResponse.ok || !telegramData.ok) {
-      throw new Error(telegramData?.description || 'Telegram sendMessage failed');
-    }
-
-    return res.status(200).json({ ok: true, reply, topicId, userId });
+    return res.status(200).json({ ok: true, status: 'No trigger keyword found' });
   } catch (error) {
     console.error('Telegram bot error:', error);
     return res.status(500).json({
